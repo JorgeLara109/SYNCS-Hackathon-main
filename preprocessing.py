@@ -14,6 +14,13 @@ def preprocess_data(file_path):
     # Load the dataset
     df = pd.read_csv(file_path)
     
+    # only if file_path ends with 1.csv, filter year >= 2015
+    if file_path.endswith("1.csv") or file_path.endswith("2.csv") or file_path.endswith("3.csv") or file_path.endswith("4.csv"):
+        df = df[df['Year'] >= 2015]
+    
+    df["index"] = range(len(df))
+
+
     # Define protected columns
     protected_columns = [
         'Period over which rainfall was measured (days)',
