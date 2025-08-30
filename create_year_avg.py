@@ -77,7 +77,7 @@ def process_elec_data():
         
         # Sort by year (optional)
         combined_data = combined_data.sort_values('year')
-        
+        combined_data["index"] = range(len(combined_data))
         # Save the new CSV file
         output_filename = os.path.join(subdir_path, "averagemwh_by_year.csv")
         combined_data.to_csv(output_filename, index=False)
