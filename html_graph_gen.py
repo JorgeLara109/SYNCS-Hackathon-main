@@ -4,19 +4,32 @@ import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, r2_score
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import plotly.offline as pyo
+import os
 
-def load_data(x_name,y_name,data_path):
-    df = pd.read_csv(data_path)
-    df = df.dropna()
+def load_data(x_name, y_name, data_path):
+    try:
+        df = pd.read_csv(data_path)
+        df = df.dropna()
+        
+        if x_name not in df.columns or y_name not in df.columns:
+            print(f"Required columns not found in {data_path}")
+            return None, None
+            
+        X = df[[x_name]]
+        y = df[y_name]
+        
+        return X, y
+    except Exception as e:
+        print(f"Error loading data from {data_path}: {e}")
+        return None, None
 
-    X = df[[x_name]]
-    y = df[y_name]
-
-    return X, y
-
-def train_model(X, y, x_name , y_name, model_type):
+def train_model(X, y, x_name, y_name, location_name, model_type, save_path=None):
     if model_type == 'RandomForest':
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        
         # Create and train the Random Forest model
         rf_model = RandomForestRegressor(n_estimators=100, random_state=42)
         rf_model.fit(X_train, y_train)
@@ -29,7 +42,7 @@ def train_model(X, y, x_name , y_name, model_type):
         rmse = np.sqrt(mse)
         r2 = r2_score(y_test, y_pred)
 
-        print(f"Random Forest Regression Results:")
+        print(f"\n=== {location_name} - Random Forest Regression Results ===")
         print(f"Mean Squared Error (MSE): {mse:.4f}")
         print(f"Root Mean Squared Error (RMSE): {rmse:.4f}")
         print(f"R-squared (R²): {r2:.4f}")
@@ -37,67 +50,186 @@ def train_model(X, y, x_name , y_name, model_type):
         print(f"\nFeature Importance:")
         print(f"Rainfall: {feature_importance[0]:.4f}")
 
-        # Create subplots
-        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
+        # Create subplots with Plotly
+        fig = make_subplots(
+            rows=2, cols=2,
+            subplot_titles=('Actual vs Predicted Values', 'Residual Plot', 
+                           'Feature Importance', f'{x_name} vs {y_name} with Prediction Line'),
+            vertical_spacing=0.1,
+            horizontal_spacing=0.1
+        )
 
         # 1. Scatter plot of actual vs predicted values
-        ax1.scatter(y_test, y_pred, alpha=0.6)
-        ax1.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'r--', lw=2)
-        ax1.set_xlabel(f'Actual {y_name}')
-        ax1.set_ylabel(f'Predicted {y_name}')
-        ax1.set_title('Actual vs Predicted Values')
-        ax1.grid(True, alpha=0.3)
+        fig.add_trace(
+            go.Scatter(
+                x=y_test, y=y_pred, mode='markers', 
+                name='Predictions', marker=dict(opacity=0.6)
+            ),
+            row=1, col=1
+        )
+        # Add perfect prediction line
+        min_val = min(y_test.min(), y_pred.min())
+        max_val = max(y_test.max(), y_pred.max())
+        fig.add_trace(
+            go.Scatter(
+                x=[min_val, max_val], y=[min_val, max_val], 
+                mode='lines', name='Perfect Prediction', line=dict(color='red', dash='dash')
+            ),
+            row=1, col=1
+        )
+        fig.update_xaxes(title_text=f'Actual {y_name}', row=1, col=1)
+        fig.update_yaxes(title_text=f'Predicted {y_name}', row=1, col=1)
 
         # 2. Residual plot
         residuals = y_test - y_pred
-        ax2.scatter(y_pred, residuals, alpha=0.6)
-        ax2.axhline(y=0, color='r', linestyle='--')
-        ax2.set_xlabel('Predicted Values')
-        ax2.set_ylabel('Residuals')
-        ax2.set_title('Residual Plot')
-        ax2.grid(True, alpha=0.3)
+        fig.add_trace(
+            go.Scatter(
+                x=y_pred, y=residuals, mode='markers', 
+                name='Residuals', marker=dict(opacity=0.6)
+            ),
+            row=1, col=2
+        )
+        # Add zero line
+        fig.add_trace(
+            go.Scatter(
+                x=[y_pred.min(), y_pred.max()], y=[0, 0], 
+                mode='lines', name='Zero Line', line=dict(color='red', dash='dash')
+            ),
+            row=1, col=2
+        )
+        fig.update_xaxes(title_text='Predicted Values', row=1, col=2)
+        fig.update_yaxes(title_text='Residuals', row=1, col=2)
 
         # 3. Feature importance plot
-        features = [x_name]
-        ax3.bar(features, feature_importance)
-        ax3.set_xlabel('Features')
-        ax3.set_ylabel('Importance')
-        ax3.set_title('Feature Importance')
-        ax3.tick_params(axis='x', rotation=45)
+        fig.add_trace(
+            go.Bar(x=[x_name], y=feature_importance, name='Feature Importance'),
+            row=2, col=1
+        )
+        fig.update_xaxes(title_text='Features', row=2, col=1)
+        fig.update_yaxes(title_text='Importance', row=2, col=1)
 
-        # 4. Prediction line plot (for visualization)
-        # Create a range of rainfall values for prediction
+        # 4. Prediction line plot
         rainfall_range = np.linspace(X[x_name].min(), X[x_name].max(), 100).reshape(-1, 1)
         predictions_range = rf_model.predict(rainfall_range)
 
-        # Plot actual data points
-        ax4.scatter(X_test, y_test, alpha=0.6, label='Actual Test Data', color='blue')
-        # Plot prediction line
-        ax4.plot(rainfall_range, predictions_range, 'r-', lw=2, label='Prediction Line')
-        ax4.set_xlabel(x_name)
-        ax4.set_ylabel(y_name)
-        ax4.set_title(f'{x_name} vs {y_name} with Prediction Line')
-        ax4.legend()
-        ax4.grid(True, alpha=0.3)
+        # Actual test data
+        fig.add_trace(
+            go.Scatter(
+                x=X_test[x_name], y=y_test, mode='markers', 
+                name='Actual Test Data', marker=dict(color='blue', opacity=0.6)
+            ),
+            row=2, col=2
+        )
+        # Prediction line
+        fig.add_trace(
+            go.Scatter(
+                x=rainfall_range.flatten(), y=predictions_range, 
+                mode='lines', name='Prediction Line', line=dict(color='red')
+            ),
+            row=2, col=2
+        )
+        fig.update_xaxes(title_text=x_name, row=2, col=2)
+        fig.update_yaxes(title_text=y_name, row=2, col=2)
 
-        # Add text box with metrics
-        textstr = f'MSE: {mse:.4f}\nRMSE: {rmse:.4f}\nR²: {r2:.4f}'
-        props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
-        fig.text(0.15, 0.02, textstr, fontsize=10, verticalalignment='bottom', bbox=props)
+        # Update layout
+        fig.update_layout(
+            height=800,
+            width=1000,
+            title_text=f"{location_name} - Random Forest Regression: {x_name} vs {y_name}",
+            showlegend=True,
+            annotations=[
+                dict(
+                    x=0.02,
+                    y=0.02,
+                    xref='paper',
+                    yref='paper',
+                    text=f'MSE: {mse:.4f}<br>RMSE: {rmse:.4f}<br>R²: {r2:.4f}',
+                    showarrow=False,
+                    font=dict(size=12),
+                    bgcolor='wheat',
+                    opacity=0.7,
+                    align='left'
+                )
+            ]
+        )
 
-        plt.tight_layout()
-        plt.show()
+        # Save to HTML file if path is provided
+        if save_path:
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            pyo.plot(fig, filename=save_path, auto_open=False)
+            print(f"Figure saved to: {save_path}")
 
         # Additional: Feature importance from all trees (optional)
         print("\nFeature importance from all trees (first 5 trees):")
         for i, tree in enumerate(rf_model.estimators_[:5]):
             print(f"Tree {i+1}: {tree.feature_importances_[0]:.4f}")
+            
+        return mse, rmse, r2
 
-x_name = 'Rainfall'
-y_name = 'Average_MWH'
-data_path = 'PreprocessData/elec/Adamstown/combined_avg.csv'
-model_type = 'RandomForest'
-X,y = load_data(x_name,y_name,data_path)
-train_model(X, y, x_name , y_name, model_type)
+def process_all_locations():
+    base_data_dir = 'PreprocessData/elec'
+    base_output_dir = 'html_graphs/Elec'
+    x_name = 'Max_Temp'
+    y_name = 'Average_MWH'
+    model_type = 'RandomForest'
+    
+    # Get all subdirectories in the base data directory
+    try:
+        locations = [d for d in os.listdir(base_data_dir) 
+                    if os.path.isdir(os.path.join(base_data_dir, d))]
+    except FileNotFoundError:
+        print(f"Directory {base_data_dir} not found!")
+        return
+    
+    results = []
+    
+    for location in locations:
+        print(f"\n{'='*50}")
+        print(f"Processing location: {location}")
+        print(f"{'='*50}")
+        
+        data_path = os.path.join(base_data_dir, location, 'combined_avg.csv')
+        save_path = os.path.join(base_output_dir, location, 'random_forest_analysis_maxT.html')
+        
+        # Load data
+        X, y = load_data(x_name, y_name, data_path)
+        
+        if X is None or y is None:
+            print(f"Skipping {location} due to data loading issues")
+            continue
+            
+        if len(X) == 0:
+            print(f"Skipping {location} - no data available")
+            continue
+            
+        # Train model and get results
+        try:
+            mse, rmse, r2 = train_model(X, y, x_name, y_name, location, model_type, save_path)
+            results.append({
+                'Location': location,
+                'MSE': mse,
+                'RMSE': rmse,
+                'R2': r2,
+                'Samples': len(X)
+            })
+        except Exception as e:
+            print(f"Error processing {location}: {e}")
+            continue
+    
+    # Print summary of all results
+    if results:
+        print(f"\n{'='*60}")
+        print("SUMMARY OF ALL LOCATIONS")
+        print(f"{'='*60}")
+        df_results = pd.DataFrame(results)
+        print(df_results.to_string(index=False))
+        
+        # Save summary to CSV
+        summary_path = os.path.join(base_output_dir, 'model_results_summary.csv')
+        os.makedirs(os.path.dirname(summary_path), exist_ok=True)
+        df_results.to_csv(summary_path, index=False)
+        print(f"\nSummary saved to: {summary_path}")
 
-
+# Run the processing for all locations
+process_all_locations()
